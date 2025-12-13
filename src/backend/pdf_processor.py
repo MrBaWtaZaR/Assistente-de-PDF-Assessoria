@@ -7,7 +7,21 @@ from typing import Optional, List, Tuple
 
 class PdfProcessor:
     def __init__(self):
-        self.price_regex = re.compile(r"R\$\s?(\d{1,3}(?:\.?\d{3})*(?:,\d{2})?)")
+        # Regex aprimorado para múltiplos formatos de preço:
+        # - R$ 14,00 (formato brasileiro padrão)
+        # - R$ 14.00 (formato com ponto decimal)
+        # - R$14,00 (sem espaço)
+        # - R$ 1.234,56 (com separador de milhar)
+        # - R$ 1,234.56 (formato americano)
+        self.price_regex = re.compile(
+            r"R\$\s*(\d{1,3}(?:[\.,]?\d{3})*(?:[\.,]\d{1,2})?)",
+            re.IGNORECASE
+        )
+        
+        # Regex alternativo para preços sem símbolo R$ mas com contexto
+        self.price_number_regex = re.compile(
+            r"(\d{1,3}(?:[\.,]?\d{3})*[\.,]\d{2})"
+        )
 
     def _get_page_bg_color(self, page) -> Tuple[float, float, float]:
         """Tenta descobrir a cor de fundo predominante da página."""
@@ -211,11 +225,52 @@ class PdfProcessor:
             return False, f"Erro Fatal: {str(e)}"
 
     def _parse_price(self, price_str: str) -> float:
-        """Converte string 'R$ 1.234,56' para float 1234.56"""
-        # Remove Símbolo e espaços
-        clean_str = price_str.replace("R$", "").strip()
-        # Remove pontos de milhar e troca vírgula por ponto
-        clean_str = clean_str.replace(".", "").replace(",", ".")
+        """
+        Converte string de preço para float, detectando automaticamente o formato.
+        Suporta:
+        - R$ 1.234,56 (BR padrão)
+        - R$ 1,234.56 (US)
+        - R$ 14.00 ou R$ 14,00 (simples)
+        """
+        # Remove Símbolo R$ e espaços
+        clean_str = price_str.replace("R$", "").replace("r$", "").strip()
+        
+        # Se não tiver nenhum separador, retorna direto
+        if '.' not in clean_str and ',' not in clean_str:
+            try:
+                return float(clean_str)
+            except ValueError:
+                return 0.0
+        
+        # Detectar formato baseado na posição dos separadores
+        last_dot = clean_str.rfind('.')
+        last_comma = clean_str.rfind(',')
+        
+        # Se só tem um tipo de separador
+        if last_dot == -1:
+            # Só tem vírgula - vírgula é decimal
+            clean_str = clean_str.replace(",", ".")
+        elif last_comma == -1:
+            # Só tem ponto
+            # Se tem mais de um ponto, os primeiros são separador de milhar
+            if clean_str.count('.') > 1:
+                parts = clean_str.rsplit('.', 1)
+                clean_str = parts[0].replace('.', '') + '.' + parts[1]
+            # Se tem só um ponto e está nos últimos 3 chars, é decimal
+            # Caso contrário é separador de milhar
+            elif len(clean_str) - last_dot <= 3:
+                pass  # Ponto já é decimal
+            else:
+                clean_str = clean_str.replace('.', '')  # Remove separador de milhar
+        else:
+            # Tem ambos - o que vem por último é o decimal
+            if last_comma > last_dot:
+                # Vírgula é decimal: 1.234,56
+                clean_str = clean_str.replace(".", "").replace(",", ".")
+            else:
+                # Ponto é decimal: 1,234.56
+                clean_str = clean_str.replace(",", "")
+        
         try:
             return float(clean_str)
         except ValueError:
@@ -226,110 +281,247 @@ class PdfProcessor:
         return f"R$ {value:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
 
     def _update_prices_on_page(self, page, markup: float) -> int:
+        """
+        Atualiza preços na página com detecção aprimorada.
+        Suporta múltiplos formatos e preserva formatação visual.
+        """
         count = 0
-        # Busca texto na página
-        text_instances = page.search_for("R$")
+        processed_rects = []  # Para evitar processar a mesma área duas vezes
         
-        # Como o search_for("R$") só pega o símbolo, precisamos capturar o número ao redor.
-        # Uma estratégia melhor é iterar sobre blocos de texto ou usar regex em todo o texto e achar as boxes.
-        
-        # Estratégia Melhorada: Get text blocks, regex match content, find bbox.
-        # Mas para simplicidade e precisão de layout, vamos usar 'get_text("words")' ou regex search
-        
-        # Vamos tentar uma abordagem híbrida: procurar o regex no texto extraído e obter as áreas.
-        # O fitz tem 'search_for' que aceita texto literal. Regex direto no search_for não é suportado nativamente dessa forma simples.
-        # Workaround: Extrair texto com 'blocks', achar o match no texto, e ter as bboxes é complexo se o texto for fragmentado.
-        
-        # Simplificação funcional: Iterar sobre todas as palavras/blocos e ver se bate com regex price.
-        words = page.get_text("words") # (x0, y0, x1, y1, "word", block_no, line_no, word_no)
-        
-        # Agrupar palavras pode ser necessário se "R$" estiver separado de "35,00".
-        # Por enquanto agiremos em tokens que contenham tudo ou vamos reconstruir linhas.
-        
-        # Vamos consolidar palavras em linhas para o regex funcionar melhor.
-        # Mas para substituir 'in-place', precisamos das coordenadas exatas.
-        
-        # Implementação Robust:
-        # Procurar por "R$"
-        matches = page.search_for("R$")
-        for rect in matches:
-            # Expandir o retângulo para a direita para tentar pegar o número
-            # Assumindo leitura da esquerda pra direita.
-            # Define uma área de busca à direita do cifrão.
-            search_rect = fitz.Rect(rect.x0, rect.y0, rect.x1 + 100, rect.y1) # +100pts deve cobrir o preço
-            
-            # Extrair texto dessa área
-            text_in_rect = page.get_text("text", clip=search_rect).strip()
-            
-            # Verificar se parece um preço completo (ex: R$ 35,00 ou apenas 35,00 se o R$ já foi achado)
-            # O texto extraído do clip pode conter o R$ de novo ou não, dependendo da precisão.
-            
-            # Vamos usar uma regex que busca o número logo após o R$
-            # Na verdade, se usarmos page.get_text("blocks"), temos o texto agrupado.
-            pass
-
-        # Abordagem Alternativa mais Segura (Text Blocks):
+        # ============================================
+        # ESTRATÉGIA 1: Buscar em spans (texto junto)
+        # ============================================
         blocks = page.get_text("dict")["blocks"]
         for b in blocks:
-            if "lines" not in b: continue
+            if "lines" not in b: 
+                continue
             for l in b["lines"]:
                 for s in l["spans"]:
                     text = s["text"]
-                    if "R$" in text:
-                        # Achamos um span com preço.
+                    text_lower = text.lower()
+                    
+                    # Verificar se contém indicador de preço
+                    if "r$" in text_lower or self._looks_like_price(text):
                         match = self.price_regex.search(text)
                         if match:
-                            old_price_str = match.group(0) # "R$ 35,00"
-                            val_str = match.group(1) # "35,00"
+                            result = self._process_price_match(page, s, match, markup, processed_rects)
+                            if result:
+                                count += 1
+        
+        # ============================================
+        # ESTRATÉGIA 2: Buscar palavras adjacentes
+        # (quando R$ está separado do número)
+        # ============================================
+        words = page.get_text("words")  # (x0, y0, x1, y1, "word", block_no, line_no, word_no)
+        
+        for i, word in enumerate(words):
+            word_text = word[4].strip().lower()
+            
+            # Se é "R$" ou "r$" sozinho
+            if word_text in ["r$", "r$:", "r$."]:
+                # Procurar próxima palavra na mesma linha
+                if i + 1 < len(words):
+                    next_word = words[i + 1]
+                    
+                    # Verificar se está na mesma linha (y similar)
+                    if abs(word[1] - next_word[1]) < 10:  # Tolerância de 10pts
+                        number_match = self.price_number_regex.search(next_word[4])
+                        if number_match:
+                            # Criar um span artificial combinando ambos
+                            combined_rect = fitz.Rect(
+                                word[0],      # x0 do R$
+                                min(word[1], next_word[1]),  # y menor
+                                next_word[2], # x1 do número
+                                max(word[3], next_word[3])   # y maior
+                            )
                             
-                            current_val = self._parse_price(text) # Usa a string toda se for só o preço
-                            if current_val == 0.0:
-                                current_val = self._parse_price(val_str)
-
+                            # Verificar se já foi processado
+                            if self._rect_already_processed(combined_rect, processed_rects):
+                                continue
+                            
+                            # Extrair informações de estilo da área
+                            original_text = f"R$ {next_word[4]}"
+                            current_val = self._parse_price(original_text)
+                            
+                            if current_val > 0:
+                                new_val = current_val + markup
+                                new_text = self._format_price(new_val)
+                                
+                                # Obter cor de fundo e texto
+                                bg_color = self._sample_background_color(page, combined_rect)
+                                text_color = self._detect_text_color(page, combined_rect)
+                                font_size = self._estimate_font_size(combined_rect)
+                                
+                                # Cobrir área original
+                                page.draw_rect(combined_rect, color=None, fill=bg_color)
+                                
+                                # Inserir novo texto
+                                page.insert_text(
+                                    (combined_rect.x0, combined_rect.y1 - 2),
+                                    new_text,
+                                    fontsize=font_size,
+                                    fontname="helv",
+                                    color=text_color
+                                )
+                                
+                                processed_rects.append(combined_rect)
+                                count += 1
+        
+        # ============================================
+        # ESTRATÉGIA 3: Buscar linhas completas
+        # (fallback para layouts complexos)
+        # ============================================
+        lines = page.get_text("text").split('\n')
+        for line in lines:
+            if 'r$' in line.lower():
+                all_matches = list(self.price_regex.finditer(line))
+                for match in all_matches:
+                    # Tentar localizar via search_for
+                    full_price = match.group(0)
+                    rects = page.search_for(full_price)
+                    
+                    for rect in rects:
+                        if self._rect_already_processed(rect, processed_rects):
+                            continue
+                        
+                        current_val = self._parse_price(full_price)
+                        if current_val > 0:
                             new_val = current_val + markup
                             new_text = self._format_price(new_val)
                             
-                            # Bounding box deste span
-                            bbox = fitz.Rect(s["bbox"])
+                            bg_color = self._sample_background_color(page, rect)
+                            text_color = self._detect_text_color(page, rect)
+                            font_size = self._estimate_font_size(rect)
                             
-                            # --- Lógica Avançada de Camuflagem (Color Sampling) ---
-                            # 1. Obter uma amostra da área do preço original
-                            # Vamos pegar 1px de borda ao redor para ter chance de pegar o fundo
-                            sample_rect = fitz.Rect(bbox.x0 - 2, bbox.y0 - 2, bbox.x1 + 2, bbox.y1 + 2)
-                            
-                            # Gerar pixmap dessa pequena área
-                            # alpha=False para ignorar transparência (queremos a cor final)
-                            try:
-                                pix = page.get_pixmap(clip=sample_rect, alpha=False)
-                                # Pegar a cor do pixel top-left (0,0) que deve ser fundo
-                                # Se o bbox estiver muito justo, 0,0 pode ser texto. Vamos tentar (-1, -1) relativo?
-                                # O pixmap é local. (0,0) é o canto do sample_rect.
-                                r, g, b = pix.pixel(0, 0)
-                                bg_color = (r/255.0, g/255.0, b/255.0)
-                            except:
-                                # Fallback para branco se falhar
-                                bg_color = (1, 1, 1)
-
-                            # Redact (Apagar original) com a cor descoberta
-                            page.draw_rect(bbox, color=None, fill=bg_color) 
-                            
-                            # Escrever novo valor
-                            # Usar fonte Helvetica (padrão sans-serif) e cor preta (ou tentar detectar cor do texto?)
-                            # Assumiremos preto para contraste.
-                            
-                            # Centralizar melhor?
-                            # Se o texto novo for menor que o rect, centralizar no X.
-                            # Mas 'insert_text' é por posição inicial.
-                            
+                            page.draw_rect(rect, color=None, fill=bg_color)
                             page.insert_text(
-                                (bbox.x0, bbox.y1 - 2), 
-                                new_text, 
-                                fontsize=s["size"], 
-                                fontname="helv", 
-                                color=(0,0,0)
+                                (rect.x0, rect.y1 - 2),
+                                new_text,
+                                fontsize=font_size,
+                                fontname="helv",
+                                color=text_color
                             )
+                            
+                            processed_rects.append(rect)
                             count += 1
+        
         return count
+    
+    def _looks_like_price(self, text: str) -> bool:
+        """Verifica se o texto parece um preço mesmo sem R$"""
+        # Padrões comuns de preço
+        return bool(self.price_number_regex.search(text))
+    
+    def _process_price_match(self, page, span, match, markup, processed_rects) -> bool:
+        """Processa um match de preço encontrado em um span"""
+        bbox = fitz.Rect(span["bbox"])
+        
+        # Verificar se já foi processado
+        if self._rect_already_processed(bbox, processed_rects):
+            return False
+        
+        old_price_str = match.group(0)
+        val_str = match.group(1)
+        
+        current_val = self._parse_price(old_price_str)
+        if current_val == 0.0:
+            current_val = self._parse_price(val_str)
+        
+        if current_val <= 0:
+            return False
+        
+        new_val = current_val + markup
+        new_text = self._format_price(new_val)
+        
+        # Obter cores
+        bg_color = self._sample_background_color(page, bbox)
+        
+        # Usar cor original do span se disponível
+        text_color = self._extract_span_color(span)
+        
+        # Cobrir área original
+        page.draw_rect(bbox, color=None, fill=bg_color)
+        
+        # Inserir novo texto mantendo estilo original
+        page.insert_text(
+            (bbox.x0, bbox.y1 - 2),
+            new_text,
+            fontsize=span["size"],
+            fontname="helv",
+            color=text_color
+        )
+        
+        processed_rects.append(bbox)
+        return True
+    
+    def _rect_already_processed(self, new_rect, processed_rects, tolerance=5) -> bool:
+        """Verifica se um retângulo já foi processado (com tolerância)"""
+        for rect in processed_rects:
+            if (abs(rect.x0 - new_rect.x0) < tolerance and
+                abs(rect.y0 - new_rect.y0) < tolerance and
+                abs(rect.x1 - new_rect.x1) < tolerance and
+                abs(rect.y1 - new_rect.y1) < tolerance):
+                return True
+        return False
+    
+    def _sample_background_color(self, page, rect) -> Tuple[float, float, float]:
+        """Amostra a cor de fundo de uma área"""
+        try:
+            # Expandir ligeiramente para pegar o fundo
+            sample_rect = fitz.Rect(rect.x0 - 5, rect.y0 - 5, rect.x1 + 5, rect.y1 + 5)
+            pix = page.get_pixmap(clip=sample_rect, alpha=False)
+            
+            # Pegar pixel do canto (geralmente é fundo)
+            r, g, b = pix.pixel(0, 0)
+            return (r/255.0, g/255.0, b/255.0)
+        except:
+            return (1, 1, 1)  # Branco padrão
+    
+    def _detect_text_color(self, page, rect) -> Tuple[float, float, float]:
+        """Tenta detectar a cor do texto na área"""
+        try:
+            pix = page.get_pixmap(clip=rect, alpha=False)
+            
+            # Coletar cores que parecem ser texto (diferente do fundo)
+            bg_r, bg_g, bg_b = pix.pixel(0, 0)
+            
+            # Procurar por pixels que diferem significativamente do fundo
+            for y in range(pix.height):
+                for x in range(pix.width):
+                    r, g, b = pix.pixel(x, y)
+                    # Se a diferença for significativa, provavelmente é texto
+                    diff = abs(r - bg_r) + abs(g - bg_g) + abs(b - bg_b)
+                    if diff > 100:
+                        return (r/255.0, g/255.0, b/255.0)
+            
+            # Se não encontrou, usar cor contrastante
+            bg_lum = 0.299 * bg_r + 0.587 * bg_g + 0.114 * bg_b
+            return (0, 0, 0) if bg_lum > 128 else (1, 1, 1)
+        except:
+            return (0, 0, 0)  # Preto padrão
+    
+    def _extract_span_color(self, span) -> Tuple[float, float, float]:
+        """Extrai a cor do span se disponível"""
+        try:
+            if "color" in span:
+                color = span["color"]
+                if isinstance(color, int):
+                    # Cor em formato inteiro (RGB packed)
+                    r = (color >> 16) & 0xFF
+                    g = (color >> 8) & 0xFF
+                    b = color & 0xFF
+                    return (r/255.0, g/255.0, b/255.0)
+                elif isinstance(color, (list, tuple)):
+                    return tuple(c/255.0 if c > 1 else c for c in color[:3])
+        except:
+            pass
+        return (0, 0, 0)  # Preto padrão
+    
+    def _estimate_font_size(self, rect) -> float:
+        """Estima o tamanho da fonte baseado na altura do retângulo"""
+        height = rect.height
+        # Fonte geralmente é ~70-80% da altura do retângulo
+        return max(8, min(72, height * 0.75))
 
     def _insert_logo_on_page(self, page, logo_path: str) -> int:
         count = 0
