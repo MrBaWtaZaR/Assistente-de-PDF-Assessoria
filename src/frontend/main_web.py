@@ -9,7 +9,7 @@ from backend.pdf_processor import PdfProcessor
 def main(page: ft.Page):
     page.title = "Editor Online de Catálogo PDF"
     page.theme_mode = ft.ThemeMode.LIGHT
-    page.scroll = ft.ScrollMode.AUTO
+    # page.scroll = ft.ScrollMode.AUTO # Scroll causa colapso do expand no web
     
     # Variáveis de Estado
     pdf_path = ft.Ref[str]()
@@ -75,9 +75,19 @@ def main(page: ft.Page):
             btn_next_1.update()
 
     def process_click(e):
-        if not pdf_path.current: return
-        try: markup = float(markup_value.current.value.replace(",", "."))
-        except: return
+        if not pdf_path.current:
+            page.open(ft.SnackBar(ft.Text("⚠️ Por favor, faça o Upload do PDF na primeira aba!", color="white"), bgcolor="red"))
+            page.update()
+            return
+
+        try: 
+            # Limpeza extra para garantir que o valor seja numérico
+            clean_val = markup_value.current.value.replace("R$", "").replace(" ", "").replace(",", ".")
+            markup = float(clean_val)
+        except Exception: 
+            page.open(ft.SnackBar(ft.Text("⚠️ Valor inválido! Use apenas números (ex: 20.00)", color="white"), bgcolor="red"))
+            page.update()
+            return
             
         btn_process.disabled = True
         btn_process.text = "PROCESSANDO (Web)..."

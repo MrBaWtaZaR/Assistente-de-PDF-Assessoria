@@ -23,6 +23,7 @@ EXPOSE 7860
 # Configurar Flet para escutar na porta correta
 ENV FLET_SERVER_PORT=7860
 ENV FLET_FORCE_WEB_VIEW=true
+ENV PYTHONPATH=/app/src
 
 # Comando de inicialização
 # Comando de inicialização
