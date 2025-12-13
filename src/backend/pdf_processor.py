@@ -425,6 +425,69 @@ class PdfProcessor:
                             processed_rects.append(rect)
                             count += 1
         
+        # ============================================
+        # ESTRATÉGIA 4: Busca direta por "R$" e expansão
+        # (para PDFs onde o texto está fragmentado)
+        # ============================================
+        # Buscar todas as ocorrências de "R$" diretamente
+        rs_rects = page.search_for("R$")
+        print(f"[DEBUG] Encontrado {len(rs_rects)} ocorrências de 'R$' via search_for")
+        
+        for rs_rect in rs_rects:
+            if self._rect_already_processed(rs_rect, processed_rects, tolerance=20):
+                continue
+            
+            # Expandir a área para a direita para capturar o número
+            # Típico: R$ + espaço + número (até 8 chars como "1.234,56")
+            expanded_rect = fitz.Rect(
+                rs_rect.x0,
+                rs_rect.y0 - 2,
+                rs_rect.x0 + 150,  # Expandir 150pt para direita
+                rs_rect.y1 + 2
+            )
+            
+            # Extrair texto dessa área expandida
+            text_in_area = page.get_text("text", clip=expanded_rect).strip()
+            print(f"[DEBUG] Área expandida: '{text_in_area}'")
+            
+            if text_in_area:
+                # Tentar encontrar preço no texto
+                match = self.price_regex.search(text_in_area)
+                if match:
+                    full_price = match.group(0)
+                    current_val = self._parse_price(full_price)
+                    
+                    print(f"[DEBUG] Preço encontrado: '{full_price}' = {current_val}")
+                    
+                    if current_val > 0:
+                        new_val = current_val + markup
+                        new_text = self._format_price(new_val)
+                        
+                        # Procurar o rect exato do preço completo
+                        price_rects = page.search_for(full_price)
+                        
+                        for price_rect in price_rects:
+                            if self._rect_already_processed(price_rect, processed_rects):
+                                continue
+                            
+                            bg_color = self._sample_background_color(page, price_rect)
+                            text_color = self._detect_text_color(page, price_rect)
+                            font_size = self._estimate_font_size(price_rect)
+                            
+                            page.draw_rect(price_rect, color=None, fill=bg_color)
+                            page.insert_text(
+                                (price_rect.x0, price_rect.y1 - 2),
+                                new_text,
+                                fontsize=font_size,
+                                fontname="helv",
+                                color=text_color
+                            )
+                            
+                            processed_rects.append(price_rect)
+                            count += 1
+                            print(f"[DEBUG] Preço atualizado via Estratégia 4!")
+        
+        print(f"[DEBUG] Total de preços atualizados: {count}")
         return count
     
     def _looks_like_price(self, text: str) -> bool:
