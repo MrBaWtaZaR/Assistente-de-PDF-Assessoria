@@ -288,10 +288,25 @@ class PdfProcessor:
         count = 0
         processed_rects = []  # Para evitar processar a mesma área duas vezes
         
+        # DEBUG: Log do texto extraído
+        full_text = page.get_text("text")
+        print(f"[DEBUG] Página - texto total: {len(full_text)} chars")
+        if "R$" in full_text or "r$" in full_text.lower():
+            print(f"[DEBUG] Contém R$!")
+            # Mostrar linhas com preços
+            for line in full_text.split('\n'):
+                if 'R$' in line or 'r$' in line.lower():
+                    print(f"[DEBUG] Linha com preço: '{line.strip()}'")
+        else:
+            print(f"[DEBUG] NÃO contém R$ no texto!")
+            print(f"[DEBUG] Preview: {full_text[:500]}")
+        
         # ============================================
         # ESTRATÉGIA 1: Buscar em spans (texto junto)
         # ============================================
         blocks = page.get_text("dict")["blocks"]
+        print(f"[DEBUG] Total de blocos: {len(blocks)}")
+        
         for b in blocks:
             if "lines" not in b: 
                 continue
@@ -302,11 +317,16 @@ class PdfProcessor:
                     
                     # Verificar se contém indicador de preço
                     if "r$" in text_lower or self._looks_like_price(text):
+                        print(f"[DEBUG] Span com preço: '{text}'")
                         match = self.price_regex.search(text)
                         if match:
+                            print(f"[DEBUG] Regex match: '{match.group(0)}'")
                             result = self._process_price_match(page, s, match, markup, processed_rects)
                             if result:
                                 count += 1
+                                print(f"[DEBUG] Preço processado com sucesso!")
+                        else:
+                            print(f"[DEBUG] Regex NÃO casou com: '{text}'")
         
         # ============================================
         # ESTRATÉGIA 2: Buscar palavras adjacentes
