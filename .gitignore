@@ -1,0 +1,41 @@
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+.env
+.venv
+
+# IDEs
+.vscode/
+.idea/
+
+# Projeto Específico
+*.pdf
+temp/
+run_v2.temp
+uploaded_image_*.png
+output_*.pdf
+v2_processed_*.pdf
+catalogo_editado_*.pdf
