@@ -156,8 +156,9 @@ def main(page: ft.Page):
     tab1_content = ft.Column([
         ft.Row([ft.ElevatedButton("Upload PDF", icon=ft.Icons.UPLOAD_FILE, on_click=lambda _: picker_pdf.pick_files(allow_multiple=False, allowed_extensions=["pdf"])), txt_pdf_name, ft.Container(expand=True), lbl_page_count, btn_next_1]),
         ft.Divider(),
-        ft.Container(grid_pages, expand=True, bgcolor="#f9f9f9", padding=10, border_radius=10)
-    ], expand=True)
+        # FIX: Altura fixa para garantir que o Grid apareça (Layout Web é chato com expand)
+        ft.Container(grid_pages, height=400, bgcolor="#f9f9f9", padding=10, border_radius=10, border=ft.border.all(1, "#eeeeee"))
+    ], expand=False) # Expand False aqui para respeitar a altura fixa dos filhos
 
     img_logo = ft.Image(width=100, height=100, fit=ft.ImageFit.CONTAIN, src="")
     tab2_content = ft.Container(content=ft.Column([
