@@ -24,6 +24,19 @@ class PdfProcessor:
         self.price_number_regex = re.compile(
             r"(\d{1,3}(?:[\.,]?\s*\d{3})*[\.,]\s*\d{2})"
         )
+        
+        # Regex para preços em contexto (sem R$) - captura número + contexto
+        # Exemplos: "DE 15,00 NO ATACADO", "14,00 NO ATACADO", "A PARTIR DE 50 PEÇAS 14,00"
+        self.price_context_regex = re.compile(
+            r"(?:DE\s+)?(\d{1,3}[\.,]\s*\d{2})\s*(?:NO\s+ATACADO|REAIS|POR\s+PEÇA|ATACADO)",
+            re.IGNORECASE
+        )
+        
+        # Palavras-chave que indicam contexto de preço
+        self.price_context_keywords = [
+            "ATACADO", "PEÇAS", "PÇS", "REAIS", "UNIDADE", "PEÇA", 
+            "A PARTIR", "DE ", "POR ", "NO ATACADO"
+        ]
 
     def _get_page_bg_color(self, page) -> Tuple[float, float, float]:
         """Tenta descobrir a cor de fundo predominante da página."""
@@ -492,8 +505,165 @@ class PdfProcessor:
                             count += 1
                             print(f"[DEBUG] Preço atualizado via Estratégia 4!")
         
+        # ============================================
+        # ESTRATÉGIA 5: Buscar preços SEM R$ mas com contexto
+        # (para PDFs onde o R$ está na imagem, não no texto)
+        # ============================================
+        full_text = page.get_text("text")
+        
+        # Buscar padrões como "DE 15,00 NO ATACADO" ou "14,00 NO ATACADO"
+        context_matches = list(self.price_context_regex.finditer(full_text))
+        print(f"[DEBUG] Estratégia 5: {len(context_matches)} preços em contexto encontrados")
+        
+        for match in context_matches:
+            price_str = match.group(1)  # Apenas o número
+            full_match = match.group(0)  # Match completo com contexto
+            
+            current_val = self._parse_price(price_str)
+            print(f"[DEBUG] Contexto: '{full_match}' -> Preço: {price_str} = {current_val}")
+            
+            if current_val > 0:
+                new_val = current_val + markup
+                # Formatar SEM o R$ já que no original não tinha
+                new_price_only = f"{new_val:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
+                
+                # Buscar onde o número original aparece
+                price_rects = page.search_for(price_str)
+                
+                for price_rect in price_rects:
+                    if self._rect_already_processed(price_rect, processed_rects, tolerance=10):
+                        continue
+                    
+                    bg_color = self._sample_background_color(page, price_rect)
+                    text_color = self._detect_text_color(page, price_rect)
+                    font_size = self._estimate_font_size(price_rect)
+                    
+                    page.draw_rect(price_rect, color=None, fill=bg_color)
+                    page.insert_text(
+                        (price_rect.x0, price_rect.y1 - 2),
+                        new_price_only,  # Só o número, sem R$
+                        fontsize=font_size,
+                        fontname="helv",
+                        color=text_color
+                    )
+                    
+                    processed_rects.append(price_rect)
+                    count += 1
+                    print(f"[DEBUG] Preço SEM R$ atualizado via Estratégia 5: {price_str} -> {new_price_only}")
+        
+        # ============================================
+        # ESTRATÉGIA 6: Texto com letterspacing (espaços entre caracteres)
+        # Exemplo: "R $  1 4 . 0 0" ao invés de "R$ 14.00"
+        # ============================================
+        # Verificar se o texto tem padrão de espaçamento (letras isoladas com espaços)
+        normalized_text = self._normalize_spaced_text(full_text)
+        
+        if normalized_text != full_text:
+            print(f"[DEBUG] Estratégia 6: Texto normalizado detectado")
+            
+            # Buscar preços no texto normalizado
+            all_price_matches = list(self.price_regex.finditer(normalized_text))
+            print(f"[DEBUG] Estratégia 6: {len(all_price_matches)} preços no texto normalizado")
+            
+            for match in all_price_matches:
+                price_str = match.group(0)
+                current_val = self._parse_price(price_str)
+                
+                if current_val > 0:
+                    new_val = current_val + markup
+                    new_text = self._format_price(new_val)
+                    
+                    print(f"[DEBUG] Estratégia 6: Preço '{price_str}' = {current_val} -> {new_val}")
+                    
+                    # Para texto com letterspacing, não podemos usar search_for
+                    # Precisamos encontrar os spans que contêm números
+                    blocks = page.get_text("dict")["blocks"]
+                    for b in blocks:
+                        if "lines" not in b:
+                            continue
+                        for l in b["lines"]:
+                            # Combinar todos os spans da linha
+                            line_text = ""
+                            line_spans = []
+                            for s in l["spans"]:
+                                line_text += s["text"]
+                                line_spans.append(s)
+                            
+                            # Normalizar e verificar se contém o preço
+                            norm_line = line_text.replace(" ", "")
+                            price_no_space = price_str.replace(" ", "")
+                            
+                            if price_no_space in norm_line:
+                                # Calcular bbox da linha inteira
+                                if line_spans:
+                                    x0 = min(s["bbox"][0] for s in line_spans)
+                                    y0 = min(s["bbox"][1] for s in line_spans)
+                                    x1 = max(s["bbox"][2] for s in line_spans)
+                                    y1 = max(s["bbox"][3] for s in line_spans)
+                                    line_bbox = fitz.Rect(x0, y0, x1, y1)
+                                    
+                                    if self._rect_already_processed(line_bbox, processed_rects, tolerance=15):
+                                        continue
+                                    
+                                    bg_color = self._sample_background_color(page, line_bbox)
+                                    text_color = self._detect_text_color(page, line_bbox)
+                                    font_size = self._estimate_font_size(line_bbox)
+                                    
+                                    # Cobrir a linha original
+                                    page.draw_rect(line_bbox, color=None, fill=bg_color)
+                                    
+                                    # Inserir novo texto (reconstruir linha com preço novo)
+                                    new_line = line_text.replace(" ", "")  # Normalizar
+                                    new_line = new_line.replace(price_no_space, new_text.replace(" ", ""))
+                                    
+                                    page.insert_text(
+                                        (line_bbox.x0, line_bbox.y1 - 2),
+                                        new_line,
+                                        fontsize=font_size,
+                                        fontname="helv",
+                                        color=text_color
+                                    )
+                                    
+                                    processed_rects.append(line_bbox)
+                                    count += 1
+                                    print(f"[DEBUG] Preço com letterspacing atualizado: {price_str} -> {new_text}")
+                                    break
+        
         print(f"[DEBUG] Total de preços atualizados: {count}")
         return count
+    
+    def _normalize_spaced_text(self, text: str) -> str:
+        """
+        Normaliza texto com letterspacing (espaços entre caracteres).
+        Exemplo: "R $  1 4 . 0 0" -> "R$ 14.00"
+        """
+        import re
+        
+        # Indicadores de letterspacing:
+        # 1. "R $" ao invés de "R$"
+        # 2. Dígitos separados por espaço como "1 4"
+        has_spaced_rs = bool(re.search(r'R\s+\$', text))
+        spaced_digits = re.findall(r'(\d)\s+(\d)', text)
+        
+        # Se tem "R $" ou tem 2+ sequências de dígitos espaçados, é letterspacing
+        if has_spaced_rs or len(spaced_digits) >= 2:
+            # Remover espaços entre dígitos (repetir até não ter mais mudanças)
+            normalized = text
+            prev = None
+            while normalized != prev:
+                prev = normalized
+                normalized = re.sub(r'(\d)\s+(\d)', r'\1\2', normalized)
+            
+            # Remover espaço entre R e $
+            normalized = re.sub(r'R\s+\$', 'R$', normalized)
+            # Remover espaços ao redor de ponto/vírgula decimal
+            normalized = re.sub(r'(\d)\s*\.\s*(\d)', r'\1.\2', normalized)
+            normalized = re.sub(r'(\d)\s*,\s*(\d)', r'\1,\2', normalized)
+            # Remover espaços múltiplos
+            normalized = re.sub(r'\s+', ' ', normalized)
+            return normalized
+        
+        return text
     
     def _looks_like_price(self, text: str) -> bool:
         """Verifica se o texto parece um preço mesmo sem R$"""
