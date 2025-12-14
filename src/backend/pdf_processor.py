@@ -12,15 +12,17 @@ class PdfProcessor:
         # - R$ 14.00 (formato com ponto decimal)
         # - R$14,00 (sem espaço)
         # - R$ 1.234,56 (com separador de milhar)
-        # - R$ 1,234.56 (formato americano)
+        # - R$ 18, 00 (com espaço antes dos centavos!)
+        # - R$ 13.00 REAIS (com texto após)
         self.price_regex = re.compile(
-            r"R\$\s*(\d{1,3}(?:[\.,]?\d{3})*(?:[\.,]\d{1,2})?)",
+            r"R\$\s*(\d{1,3}(?:[\.,]?\s*\d{3})*(?:[\.,]\s*\d{1,2})?)",
             re.IGNORECASE
         )
         
         # Regex alternativo para preços sem símbolo R$ mas com contexto
+        # Aceita espaços opcionais entre número e centavos
         self.price_number_regex = re.compile(
-            r"(\d{1,3}(?:[\.,]?\d{3})*[\.,]\d{2})"
+            r"(\d{1,3}(?:[\.,]?\s*\d{3})*[\.,]\s*\d{2})"
         )
 
     def _get_page_bg_color(self, page) -> Tuple[float, float, float]:
@@ -231,9 +233,12 @@ class PdfProcessor:
         - R$ 1.234,56 (BR padrão)
         - R$ 1,234.56 (US)
         - R$ 14.00 ou R$ 14,00 (simples)
+        - R$ 18, 00 (com espaços internos)
         """
-        # Remove Símbolo R$ e espaços
+        # Remove Símbolo R$, espaços externos e internos
         clean_str = price_str.replace("R$", "").replace("r$", "").strip()
+        # Remove espaços internos (ex: "18, 00" -> "18,00")
+        clean_str = clean_str.replace(" ", "")
         
         # Se não tiver nenhum separador, retorna direto
         if '.' not in clean_str and ',' not in clean_str:
