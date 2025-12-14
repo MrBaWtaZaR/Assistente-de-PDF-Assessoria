@@ -612,15 +612,27 @@ class PdfProcessor:
                                     # Cobrir a linha original
                                     page.draw_rect(line_bbox, color=None, fill=bg_color)
                                     
-                                    # Inserir novo texto (reconstruir linha com preço novo)
-                                    new_line = line_text.replace(" ", "")  # Normalizar
-                                    new_line = new_line.replace(price_no_space, new_text.replace(" ", ""))
+                                    # CORREÇÃO: Substituir apenas o preço no texto ORIGINAL (preservando espaços)
+                                    # Encontrar e substituir padrão como "R $  1 4 . 0 0" por "R$ 34,00"
+                                    import re
+                                    # Criar padrão para encontrar o preço com espaços
+                                    # Exemplo: "R $  1 4 . 0 0" ou "R$ 14.00"
+                                    price_pattern = r'R\s*\$\s*' + r'\s*'.join(list(price_str.replace("R$", "").replace(" ", "")))
+                                    new_line = re.sub(price_pattern, new_text, line_text, flags=re.IGNORECASE)
                                     
+                                    # Se não conseguiu substituir com regex, tentar abordagem mais simples
+                                    if new_line == line_text:
+                                        # Remover espaços extras mas preservar palavras
+                                        new_line = ' '.join(line_text.split())
+                                        # Substituir preço normalizado
+                                        new_line = new_line.replace(price_str, new_text)
+                                    
+                                    # Inserir novo texto com fonte BOLD
                                     page.insert_text(
                                         (line_bbox.x0, line_bbox.y1 - 2),
                                         new_line,
                                         fontsize=font_size,
-                                        fontname="helv",
+                                        fontname="hebo",  # Helvetica Bold
                                         color=text_color
                                     )
                                     
