@@ -75,7 +75,7 @@ jobs:
                   cm=re.search(r"Cidades atendidas\s*\((\d+)\)"," ".join(lines[im:im+3]))
                   nc=int(cm.group(1)) if cm else None
                   localraw=" ".join(lines[im+1:iw]).strip()
-                  phone=re.findall(r"\(\d{2}\)\s*9?\d[\d\s-]{6,12}\d", " ".join(lines[iw+1:iw+12]))
+                  phone=re.findall(r"\(\d{2}\)\s*(?:9\s*)?\d{4}-\d{4}", " ".join(lines[iw+1:iw+12]))
                   if not phone:
                     phone=re.findall(r"\(\d{2}\)\s*\d{4,5}-?\d{4}",text)
                   tel1=phone[0].strip() if phone else ""
