@@ -1,0 +1,124 @@
+name: AF Assessoria - coleta de excursoes
+on:
+  push:
+    branches: [af-coleta-excursoes-20261013]
+permissions:
+  contents: write
+jobs:
+  coleta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests beautifulsoup4
+      - name: Coletar 32 paginas publicas
+        run: |
+          mkdir -p data/af_excursoes
+          python - <<'PY'
+          import requests, re, csv, json, uuid, time
+          from bs4 import BeautifulSoup, NavigableString
+          from datetime import datetime, timezone
+          from pathlib import Path
+          path=Path("data/af_excursoes")
+          rows=[]
+          diag={"pages":[],"errors":[]}
+          s=requests.Session()
+          s.headers.update({"User-Agent":"Mozilla/5.0 (compatible; AF-Assistente-Dados/1.0; contato: consulta publica)"})
+          fields=["id_externo","nome","origem","uf_origem","endereco_moda_center","setor_cor","vaga","telefone_1","telefone_2","cidades_atendidas","total_localidades_informadas","fonte_url","fonte_tipo","data_consulta","status","observacoes","rota_original"]
+          for pg in range(1,33):
+            url=f"https://lojamama.com.br/excursoes?pagina={pg}" if pg>1 else "https://lojamama.com.br/excursoes"
+            try:
+              resp=s.get(url, timeout=25)
+              resp.raise_for_status()
+              soup=BeautifulSoup(resp.text,"html.parser")
+              parsed=[]
+              heads=soup.find_all(["h2","h3"])
+              diag["pages"].append({"page":pg,"status":resp.status_code,"bytes":len(resp.content),"headings":len(heads),"title":soup.title.get_text(strip=True) if soup.title else "","example_headings":[h.get_text(" ",strip=True) for h in heads[:5]]})
+              for h in heads:
+                name=h.get_text(" ",strip=True)
+                if not name or name.lower() in ("excursões","excursoes"):
+                  continue
+                nxt=h.find_next(["h2","h3"])
+                e=h.next_element
+                lines=[]
+                guard=0
+                while e is not None and e is not nxt and guard<9000:
+                  if isinstance(e, NavigableString):
+                    t=str(e).strip()
+                    if t: lines.append(re.sub(r"\s+"," ",t))
+                  e=e.next_element
+                  guard+=1
+                text=" ".join(lines)
+                if not ("Origem" in text and "Cidades atendidas" in text and "WhatsApp" in text):
+                  continue
+                try:
+                  ii=next(i for i,t in enumerate(lines) if "Origem" in t)
+                  im=next(i for i,t in enumerate(lines) if "Cidades atendidas" in t)
+                  iw=next(i for i,t in enumerate(lines) if "WhatsApp" in t)
+                  if ii>=im or im>=iw: continue
+                  orig=" ".join(lines[ii:ii+2]).replace("Origem","",1).strip()
+                  loc=" ".join(lines[ii+1:im]).strip()
+                  # origem costuma estar no mesmo elemento ou no seguinte
+                  if not orig and ii+1<len(lines):
+                    orig=lines[ii+1].strip()
+                    loc=" ".join(lines[ii+2:im]).strip()
+                  else:
+                    if "Origem"==lines[ii] and ii+1<len(lines):
+                      orig=lines[ii+1]
+                      loc=" ".join(lines[ii+2:im]).strip()
+                    elif lines[ii].startswith("Origem "):
+                      orig=lines[ii].removeprefix("Origem ").strip()
+                      loc=" ".join(lines[ii+1:im]).strip()
+                  cm=re.search(r"Cidades atendidas\s*\((\d+)\)"," ".join(lines[im:im+3]))
+                  nc=int(cm.group(1)) if cm else None
+                  localraw=" ".join(lines[im+1:iw]).strip()
+                  phone=re.findall(r"\(\d{2}\)\s*9?\d[\d\s-]{6,12}\d", " ".join(lines[iw+1:iw+12]))
+                  if not phone:
+                    phone=re.findall(r"\(\d{2}\)\s*\d{4,5}-?\d{4}",text)
+                  tel1=phone[0].strip() if phone else ""
+                  tel2=phone[1].strip() if len(phone)>1 else ""
+                  uf=re.search(r"\b([A-Z]{2})$",orig)
+                  setor=re.search(r"(?:Setor\s+|^)(Azul|Amarelo|Verde|Vermelho|Branco|Laranja)\b",loc,re.I)
+                  if not setor: setor=re.search(r"\b(Azul|Amarelo|Verde|Vermelho|Branco|Laranja)\b",loc,re.I)
+                  vaga=re.search(r"Vaga(?:s)?\s*(?:N[º°o]\s*)?([\dA-Za-z,/.\s-]+?)(?=\s*-\s*|$)",loc,re.I)
+                  if not vaga and re.search(r"^(AZUL|VERDE|LARANJA|BRANCO|VERMELHO|AMARELO)\s*-?\s*",loc,re.I):
+                    vaga=re.search(r"^(?:AZUL|VERDE|LARANJA|BRANCO|VERMELHO|AMARELO)\s*-?\s*(.+)$",loc,re.I)
+                  citypipe=re.sub(r"(/(?:AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO))\s+(?=\S)",r"\1 | ",localraw)
+                  key=(name.lower()+"|"+tel1.replace(" ","")).strip()
+                  row={"id_externo":str(uuid.uuid5(uuid.NAMESPACE_URL,"https://lojamama.com.br/excursoes/"+key)),
+                    "nome":name,"origem":orig,"uf_origem":uf.group(1) if uf else "",
+                    "endereco_moda_center":loc,"setor_cor":setor.group(1).title() if setor else "",
+                    "vaga":vaga.group(1).strip() if vaga else "",
+                    "telefone_1":tel1,"telefone_2":tel2,"cidades_atendidas":citypipe,
+                    "total_localidades_informadas":nc or 0,"fonte_url":url,"fonte_tipo":"auxiliar",
+                    "data_consulta":datetime.now(timezone.utc).date().isoformat(),
+                    "status":"A confirmar","observacoes":"Conferir vaga, telefone e destinos antes de envio.",
+                    "rota_original":localraw}
+                  parsed.append(row)
+                except Exception as err:
+                  diag["errors"].append({"page":pg,"name":name,"error":str(err),"context":lines[:35]})
+              rows.extend(parsed)
+              diag["pages"][-1]["records"]=len(parsed)
+              diag["pages"][-1]["first_names"]=[x["nome"] for x in parsed[:3]]
+            except Exception as err:
+              diag["errors"].append({"page":pg,"error":str(err)})
+              diag["pages"].append({"page":pg,"records":0,"error":str(err)})
+            time.sleep(0.4)
+          (path/"diagnostico.json").write_text(json.dumps(diag,ensure_ascii=False,indent=2),encoding="utf-8")
+          (path/"excursoes_381.json").write_text(json.dumps(rows,ensure_ascii=False,indent=2),encoding="utf-8")
+          with (path/"excursoes_381.csv").open("w",encoding="utf-8-sig",newline="") as f:
+            w=csv.DictWriter(f,fieldnames=fields);w.writeheader();w.writerows(rows)
+          count_by_page=[x.get("records") for x in diag["pages"]]
+          unique=len(set((x["nome"].lower(),re.sub(r"\D","",x["telefone_1"])) for x in rows))
+          (path/"resumo.txt").write_text(f"TOTAL={len(rows)}\nUNICOS_NOME_TELEFONE={unique}\nPAGINAS={len(diag['pages'])}\nPOR_PAGINA={count_by_page}\nERROS={len(diag['errors'])}\n",encoding="utf-8")
+          print((path/"resumo.txt").read_text())
+          PY
+      - name: Salvar CSV e JSON na branch separada
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/af_excursoes/
+          git diff --cached --quiet || (git commit -m "Gerar base de excursoes a partir da listagem publica" && git push)
