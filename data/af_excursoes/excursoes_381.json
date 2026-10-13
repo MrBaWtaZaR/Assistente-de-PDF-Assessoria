@@ -3477,6 +3477,25 @@
     "rota_original": "Olinda/PE Paulista/PE Recife/PE"
   },
   {
+    "id_externo": "8e16bee5-4490-59b7-9cc4-57c695bd7408",
+    "nome": "Júnior e Eliane",
+    "origem": "João Pessoa - PB",
+    "uf_origem": "PB",
+    "endereco_moda_center": "Moda Center - Vaga 68 - Setor Vermelho",
+    "setor_cor": "Vermelho",
+    "vaga": "68",
+    "telefone_1": "",
+    "telefone_2": "",
+    "cidades_atendidas": "Bayeux/PB | Cajá/PB | Campina Grande/PB | João Pessoa/PB | Queimadas/PB | Santa Rita/PB",
+    "total_localidades_informadas": 6,
+    "fonte_url": "https://lojamama.com.br/excursoes?pagina=16",
+    "fonte_tipo": "auxiliar",
+    "data_consulta": "2026-10-13",
+    "status": "A confirmar",
+    "observacoes": "Conferir vaga, telefone e destinos antes de envio.",
+    "rota_original": "Bayeux/PB Cajá/PB Campina Grande/PB João Pessoa/PB Queimadas/PB Santa Rita/PB"
+  },
+  {
     "id_externo": "f783b216-5edc-5a3f-88a2-00c8dd35fa7e",
     "nome": "Junior Excursão",
     "origem": "Parelhas - RN",
@@ -5204,6 +5223,25 @@
     "status": "A confirmar",
     "observacoes": "Conferir vaga, telefone e destinos antes de envio.",
     "rota_original": "Alagoa Grande/PB Alagoinha/PB Araçagi/PB Belém/PB Guarabira/PB Itapororoca/PB Mamanguape/PB Marí/PB Pirpirituba/PB Sapé/PB Sertãozinho/PB"
+  },
+  {
+    "id_externo": "76a0bcb0-601b-5756-8b31-3c7b901feab7",
+    "nome": "Pedro Transportes",
+    "origem": "Recife - PE",
+    "uf_origem": "PE",
+    "endereco_moda_center": "Moda Center - Vaga 82 - Setor Verde",
+    "setor_cor": "Verde",
+    "vaga": "82",
+    "telefone_1": "",
+    "telefone_2": "",
+    "cidades_atendidas": "- PE Abreu e Lima/PE | Bezerros/PE | Cabo de Santo Agostinho/PE | Camaragibe/PE | Caruaru/PE | Gravatá/PE | Igarassu/PE | Ipojuca/PE | Jaboatão do Guararapes/PE | Moreno/PE | Olinda/PE | Paulista/PE | Pombos/PE | Recife/PE | Santa Cruz do Capibaribe/PE | São Lourenço da Mata/PE | Toritama/PE | Vitória de Santo Antão/PE",
+    "total_localidades_informadas": 19,
+    "fonte_url": "https://lojamama.com.br/excursoes?pagina=23",
+    "fonte_tipo": "auxiliar",
+    "data_consulta": "2026-10-13",
+    "status": "A confirmar",
+    "observacoes": "Conferir vaga, telefone e destinos antes de envio.",
+    "rota_original": "- PE Abreu e Lima/PE Bezerros/PE Cabo de Santo Agostinho/PE Camaragibe/PE Caruaru/PE Gravatá/PE Igarassu/PE Ipojuca/PE Jaboatão do Guararapes/PE Moreno/PE Olinda/PE Paulista/PE Pombos/PE Recife/PE Santa Cruz do Capibaribe/PE São Lourenço da Mata/PE Toritama/PE Vitória de Santo Antão/PE"
   },
   {
     "id_externo": "a7018819-9b95-5cb1-a797-ac7c2e3df056",
