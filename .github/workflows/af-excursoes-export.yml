@@ -52,12 +52,12 @@ jobs:
                   e=e.next_element
                   guard+=1
                 text=" ".join(lines)
-                if not ("Origem" in text and "Cidades atendidas" in text and "WhatsApp" in text):
+                if not ("Origem" in text and "Cidades atendidas" in text ):
                   continue
                 try:
                   ii=next(i for i,t in enumerate(lines) if "Origem" in t)
                   im=next(i for i,t in enumerate(lines) if "Cidades atendidas" in t)
-                  iw=next(i for i,t in enumerate(lines) if "WhatsApp" in t)
+                  iw=next((i for i,t in enumerate(lines) if "WhatsApp" in t or "Contato não informado" in t),len(lines))
                   if ii>=im or im>=iw: continue
                   orig=" ".join(lines[ii:ii+2]).replace("Origem","",1).strip()
                   loc=" ".join(lines[ii+1:im]).strip()
